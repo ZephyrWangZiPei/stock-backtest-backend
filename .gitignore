@@ -385,3 +385,6 @@ dump.rdb
 
 # Gunicorn
 gunicorn.conf.py 
+
+# 环境变量
+ .env

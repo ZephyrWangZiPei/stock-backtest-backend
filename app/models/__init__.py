@@ -1,16 +1,20 @@
 from .stock import Stock
-from .daily_data import DailyData
-from .strategy import Strategy
-from .backtest import BacktestResult, BacktestTrade
 from .watchlist import UserWatchlist
 from .realtime_data import RealtimeData
+from .daily_data import DailyData
+from .strategy import Strategy
+from .update_log import UpdateLog
+from .backtest import BacktestResult, BacktestTrade
+from .candidate_stock import CandidateStock
 
 __all__ = [
     'Stock',
-    'DailyData', 
+    'UserWatchlist',
+    'RealtimeData',
+    'DailyData',
     'Strategy',
+    'UpdateLog',
     'BacktestResult',
     'BacktestTrade',
-    'UserWatchlist',
-    'RealtimeData'
+    'CandidateStock'
 ] 

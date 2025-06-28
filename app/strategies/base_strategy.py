@@ -7,12 +7,18 @@ class BaseStrategy(ABC):
     """
     策略基类，所有具体策略都应继承此类。
     """
-    def __init__(self, parameters: dict):
+    def __init__(self, custom_parameters: dict = None):
         """
         初始化策略。
-        :param parameters: 一个包含策略所需参数的字典。
+        :param custom_parameters: 一个可选的字典，用于覆盖默认参数。
         """
-        self.parameters = parameters
+        # 获取默认参数
+        definitions = self.get_parameter_definitions()
+        self.parameters = {p['name']: p['default'] for p in definitions}
+
+        # 如果提供了自定义参数，则用它来更新默认参数
+        if custom_parameters:
+            self.parameters.update(custom_parameters)
 
     @abstractmethod
     def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:

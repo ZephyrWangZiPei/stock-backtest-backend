@@ -9,8 +9,8 @@ class MacdStrategy(BaseStrategy):
     - 死叉 (卖出信号): MACD线 (快线) 从上方向下穿过信号线 (慢线)。
     """
 
-    def __init__(self, parameters: dict):
-        super().__init__(parameters)
+    def __init__(self, custom_parameters: dict = None):
+        super().__init__(custom_parameters)
         self.fast = self.parameters.get('fast', 12)
         self.slow = self.parameters.get('slow', 26)
         self.signal_period = self.parameters.get('signal', 9)

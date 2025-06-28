@@ -9,8 +9,8 @@ class RsiStrategy(BaseStrategy):
     - 超买 (卖出信号): RSI 从上向下穿过超买线 (e.g., 70)。
     """
 
-    def __init__(self, parameters: dict):
-        super().__init__(parameters)
+    def __init__(self, custom_parameters: dict = None):
+        super().__init__(custom_parameters)
         self.rsi_length = self.parameters.get('rsi_length', 14)
         self.oversold_threshold = self.parameters.get('oversold_threshold', 30)
         self.overbought_threshold = self.parameters.get('overbought_threshold', 70)

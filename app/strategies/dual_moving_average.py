@@ -9,8 +9,8 @@ class DualMovingAverageStrategy(BaseStrategy):
     - 死叉 (卖出信号): 短期均线从上方向下穿过长期均线。
     """
 
-    def __init__(self, parameters: dict):
-        super().__init__(parameters)
+    def __init__(self, custom_parameters: dict = None):
+        super().__init__(custom_parameters)
         self.short_window = self.parameters.get('short_window', 5)
         self.long_window = self.parameters.get('long_window', 20)
         self.short_ma_col = f'ma{self.short_window}'

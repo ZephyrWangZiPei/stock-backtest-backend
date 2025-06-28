@@ -1,7 +1,7 @@
 import baostock as bs
 import pandas as pd
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -77,18 +77,19 @@ class BaostockClient:
             
         return rs.get_data()
 
-    def get_stock_history(self, code: str, start_date: str, end_date: str) -> pd.DataFrame:
-        """
-        获取单只股票的日K线数据
-        """
-        if not self._is_logged_in:
-            raise ConnectionError("BaoStock is not logged in.")
-            
-        fields = "date,code,open,high,low,close,volume,amount,turn"
-        rs = self.bs.query_history_k_data_plus(code, fields, start_date=start_date, end_date=end_date, frequency="d", adjustflag="2") # 2是前复权
+    def get_stock_history(self, stock_code, start_date=None, end_date=None, days_ago=None):
+        if days_ago:
+            end_date = datetime.now().strftime('%Y-%m-%d')
+            start_date = (datetime.now() - timedelta(days=days_ago)).strftime('%Y-%m-%d')
+        
+        if not all([stock_code, start_date, end_date]):
+            raise ValueError("Must provide stock_code, start_date, and end_date, or days_ago.")
+
+        fields = "date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,isST"
+        rs = self.bs.query_history_k_data_plus(stock_code, fields, start_date=start_date, end_date=end_date, frequency="d", adjustflag="2") # 2是前复权
         
         if rs.error_code != '0':
-            logger.error(f'获取 {code} 历史数据失败: {rs.error_msg}')
+            logger.error(f'获取 {stock_code} 历史数据失败: {rs.error_msg}')
             return pd.DataFrame()
         
         return rs.get_data() 

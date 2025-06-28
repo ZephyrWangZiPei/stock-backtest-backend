@@ -19,8 +19,11 @@ from .data_query import ns as data_query_ns
 from .strategies import ns as strategies_ns
 from .backtest import ns as backtest_ns
 from .stocks import ns as stocks_ns
-# from .watchlist import ns as watchlist_ns
-# from .realtime import ns as realtime_ns
+from .realtime import ns as realtime_ns
+from .signals import ns as signals_ns
+from .system_stats import ns as system_stats_ns
+from .watchlist import ns as watchlist_ns
+from .jobs import ns as jobs_ns
 
 # 注册命名空间
 api.add_namespace(data_collection_ns, path='/data-collection')
@@ -28,8 +31,11 @@ api.add_namespace(data_query_ns, path='/data-query')
 api.add_namespace(strategies_ns, path='/strategies')
 api.add_namespace(backtest_ns, path='/backtests')
 api.add_namespace(stocks_ns, path='/stocks')
-# api.add_namespace(watchlist_ns, path='/watchlist')
-# api.add_namespace(realtime_ns, path='/realtime')
+api.add_namespace(realtime_ns, path='/realtime')
+api.add_namespace(signals_ns, path='/signals')
+api.add_namespace(system_stats_ns, path='/stats')
+api.add_namespace(watchlist_ns, path='/watchlist')
+api.add_namespace(jobs_ns, path='/jobs')
 
 def init_api(app):
     """初始化所有API蓝图"""

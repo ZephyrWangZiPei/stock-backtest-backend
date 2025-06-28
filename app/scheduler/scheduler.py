@@ -9,6 +9,13 @@ from flask_socketio import emit
 from app.backtester import BacktestEngine
 from app import create_app
 import json
+from .jobs import (
+    emit_scheduler_status_job, 
+    daily_data_update_job, 
+    stock_list_update_job, 
+    data_cleanup_job,
+    realtime_data_push_job
+)
 
 # Import of emit_scheduler_status_job is removed from here
 
@@ -53,9 +60,49 @@ class TaskScheduler:
         logger.info("调度器初始化完成")
         
     def init_socketio(self, socketio):
-        """绑定SocketIO实例"""
+        """绑定SocketIO实例并注册事件处理器"""
         self.socketio = socketio
-        logger.info("SocketIO实例已绑定到调度器")
+        
+        @socketio.on('request_status_update', namespace='/scheduler')
+        def handle_request_status_update():
+            logger.info("收到来自客户端的状态更新请求。")
+            self._emit_scheduler_status()
+
+        @socketio.on('setup_jobs', namespace='/scheduler')
+        def handle_setup_jobs():
+            logger.info("收到来自客户端的重置任务请求。")
+            self.setup_jobs()
+            self._emit_scheduler_status()
+
+        @socketio.on('run_job_manually', namespace='/scheduler')
+        def handle_run_job_manually(data):
+            job_id = data.get('job_id')
+            if not job_id:
+                logger.warning("手动运行任务请求缺少 'job_id'。")
+                return
+
+            logger.info(f"收到手动运行任务 '{job_id}' 的请求。")
+            job = self.scheduler.get_job(job_id)
+            if job:
+                self.scheduler.modify_job(job_id, next_run_time=datetime.now(pytz.timezone('Asia/Shanghai')))
+                logger.info(f"任务 '{job_id}' 已被调度立即执行。")
+                self._emit_scheduler_status()
+            else:
+                # 如果任务不存在，尝试根据ID执行预定义的函数
+                if job_id == 'candidate_pool':
+                     from app.jobs.candidate_pool_job import update_candidate_pool
+                     self.scheduler.add_job(
+                         func=update_candidate_pool, 
+                         id='candidate_pool_manual', 
+                         name='手动执行潜力股海选', 
+                         replace_existing=True, 
+                         misfire_grace_time=3600
+                     )
+                     logger.info("已添加并立即执行手动海选任务。")
+                else:
+                    logger.error(f"无法找到或执行未知的任务ID: {job_id}")
+
+        logger.info("SocketIO实例已绑定到调度器，并已注册事件处理器。")
         
     def start(self):
         """启动调度器"""
@@ -152,8 +199,6 @@ class TaskScheduler:
             timezone=pytz.timezone('Asia/Shanghai')
         )
         
-        from .jobs import daily_data_update_job
-        
         job = self.add_job(
             func=daily_data_update_job,
             trigger=trigger,
@@ -175,8 +220,6 @@ class TaskScheduler:
             minute=0,
             timezone=pytz.timezone('Asia/Shanghai')
         )
-        
-        from .jobs import data_cleanup_job
         
         job = self.add_job(
             func=data_cleanup_job,
@@ -201,8 +244,6 @@ class TaskScheduler:
             timezone=pytz.timezone('Asia/Shanghai')
         )
         
-        from .jobs import stock_list_update_job
-        
         job = self.add_job(
             func=stock_list_update_job,
             trigger=trigger,
@@ -217,9 +258,6 @@ class TaskScheduler:
         
     def add_status_emitter_job(self):
         """添加一个定时任务，用于定期通过WebSocket发送调度器状态。"""
-        # Delay the import to break circular dependency
-        from .jobs import emit_scheduler_status_job
-        
         if self.scheduler.get_job('status_emitter'):
             logger.info("状态推送任务已存在。")
             return
@@ -254,6 +292,7 @@ class TaskScheduler:
             ("daily_data_update", self.add_daily_data_update_job),
             ("weekend_data_cleanup", self.add_weekend_data_cleanup_job),
             ("monthly_stock_list_update", self.add_stock_list_update_job),
+            ("realtime_data_push", self.add_realtime_data_push_job),
         ]
         for job_id, add_func in core_jobs:
             if not self.scheduler.get_job(job_id):
@@ -261,7 +300,50 @@ class TaskScheduler:
                     add_func()
                     logger.info(f"核心任务 {job_id} 缺失，已自动补充")
                 except Exception as e:
-                    logger.error(f"自动补充核心任务 {job_id} 失败: {e}") 
+                    logger.error(f"自动补充核心任务 {job_id} 失败: {e}")
+    
+    def add_realtime_data_push_job(self):
+        """添加实时行情推送任务"""
+        # 交易时间内每5秒执行一次
+        trigger = CronTrigger(
+            second='*/5',  # 每5秒
+            hour='9-15',   # 交易时间 9:00-15:00
+            day_of_week='mon-fri',  # 工作日
+            timezone=pytz.timezone('Asia/Shanghai')
+        )
+        
+        job = self.add_job(
+            func=realtime_data_push_job,
+            trigger=trigger,
+            id='realtime_data_push',
+            name='实时行情推送',
+            replace_existing=True,
+            max_instances=1
+        )
+        
+        logger.info("实时行情推送任务已添加")
+        self._emit_scheduler_status() # 立即推送状态
+        return job
+
+    def setup_jobs(self):
+        """设置所有定时任务"""
+        
+        # ... existing jobs ...
+        
+        # 实时行情推送任务 - 每5秒执行一次（交易时间内）
+        self.scheduler.add_job(
+            func=realtime_data_push_job,
+            trigger='cron',
+            second='*/5',  # 每5秒
+            hour='9-15',   # 交易时间 9:00-15:00
+            day_of_week='mon-fri',  # 工作日
+            id='realtime_data_push',
+            name='实时行情推送',
+            replace_existing=True,
+            max_instances=1
+        )
+        
+        # ... existing code ...
 
 def run_backtest_task(backtest_id: int):
     """
