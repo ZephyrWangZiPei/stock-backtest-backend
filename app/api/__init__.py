@@ -24,6 +24,8 @@ from .signals import ns as signals_ns
 from .system_stats import ns as system_stats_ns
 from .watchlist import ns as watchlist_ns
 from .jobs import ns as jobs_ns
+from .top_backtest import ns as top_backtest_ns
+from .top_strategy_api import ns as top_strategy_ns
 
 # 注册命名空间
 api.add_namespace(data_collection_ns, path='/data-collection')
@@ -36,6 +38,8 @@ api.add_namespace(signals_ns, path='/signals')
 api.add_namespace(system_stats_ns, path='/stats')
 api.add_namespace(watchlist_ns, path='/watchlist')
 api.add_namespace(jobs_ns, path='/jobs')
+api.add_namespace(top_backtest_ns, path='/backtests/top')
+api.add_namespace(top_strategy_ns, path='/top-strategy')
 
 def init_api(app):
     """初始化所有API蓝图"""

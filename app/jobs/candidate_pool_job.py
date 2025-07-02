@@ -5,6 +5,7 @@ from sqlalchemy import desc
 
 from app import db, create_app, socketio, _current_app_instance
 from app.models import Stock, CandidateStock, DailyData
+from app.data_collector import DataCollector # 导入DataCollector
 
 logger = logging.getLogger(__name__)
 
@@ -100,9 +101,23 @@ def update_candidate_pool():
             num_deleted = db.session.query(CandidateStock).delete()
             logger.info(f"已清空旧的候选池，共删除 {num_deleted} 条记录。")
 
-            # 2. 获取所有活跃的A股股票
-            all_stocks = Stock.query.filter(Stock.is_active == True).all()
+            # 2. 获取并过滤所有活跃的A股股票
+            # 使用 DataCollector 中的过滤方法，确保只获取真正的股票
+            data_collector = DataCollector()
+            filtered_codes = data_collector.filter_stocks_baostock(n=60) # 使用默认参数过滤次新股等
+            
+            if not filtered_codes:
+                logger.warning("经过初步过滤后，没有符合条件的股票，任务提前结束。")
+                socketio.emit('job_status', {
+                    'job_name': 'candidate_pool', 'status': 'completed', 
+                    'message': '没有符合条件的股票，任务结束。'
+                }, namespace='/scheduler')
+                return
+
+            # 根据过滤后的代码从数据库获取股票对象
+            all_stocks = Stock.query.filter(Stock.code.in_(filtered_codes), Stock.is_active == True).all()
             total_stocks = len(all_stocks)
+            
             if not all_stocks:
                 logger.warning("数据库中没有活跃股票，任务提前结束。")
                 socketio.emit('job_status', {

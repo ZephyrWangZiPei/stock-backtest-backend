@@ -3,13 +3,15 @@ from threading import Thread
 from flask import current_app
 from flask_restx import Namespace, Resource
 from app.jobs.candidate_pool_job import update_candidate_pool
+from app.jobs.top_strategy_backtest_job import update_top_strategy_stocks
 
 logger = logging.getLogger(__name__)
 ns = Namespace('jobs', description='手动任务触发接口')
 
 # 支持的手动任务列表
 SUPPORTED_JOBS = {
-    'candidate_pool': update_candidate_pool
+    'candidate_pool': update_candidate_pool,
+    'top_strategy_backtest': update_top_strategy_stocks
 }
 
 def run_job_in_background(job_func):
@@ -33,7 +35,7 @@ class RunJob(Resource):
     def post(self, job_name):
         """
         根据名称手动触发一个后台任务。
-        目前支持的任务: 'candidate_pool'
+        目前支持的任务: 'candidate_pool', 'top_strategy_backtest'
         """
         if job_name not in SUPPORTED_JOBS:
             return {'success': False, 'message': f'不支持的任务: {job_name}'}, 404

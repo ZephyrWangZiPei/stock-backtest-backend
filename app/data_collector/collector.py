@@ -333,3 +333,187 @@ class DataCollector:
         except Exception as e:
             logger.error(f"获取指标所需历史数据失败: {e}")
             return None 
+
+    def filter_stocks_baostock(self, n: int = 60) -> List[str]:
+        """
+        过滤股票列表：1) 次新股; 2) ST, *ST, 退市股; 3) 科创、创业板股票; 4) 指数和ETF。
+        不包含涨停、跌停、停牌的实时判断，因为这需要实时行情数据且可能效率较低。
+        :param n: 过滤掉n个交易日之前上市的股票 (这里简化为n个日历日)。
+        :return: 过滤后的股票代码列表。
+        """
+        logger.info(f"开始过滤股票，排除过去 {n} 日内上市的次新股、ST/退市股、科创板/创业板股票、指数和ETF...")
+        filtered_stock_codes = []
+        try:
+            with BaostockClient() as client:
+                all_stocks_df = client.get_all_stocks()
+                if all_stocks_df is None or all_stocks_df.empty:
+                    logger.warning("未能获取所有股票列表，过滤操作取消。")
+                    return []
+
+                # 计算 n 日前的日期，用于过滤次新股
+                # 简化为日历日，如果需要精确交易日，则需要额外查询 Baostock 交易日历
+                n_days_ago = (datetime.now() - timedelta(days=n)).date()
+
+                for _, row in all_stocks_df.iterrows():
+                    stock_code = row.get('code')
+                    stock_name = row.get('code_name', '')
+                    ipo_date_str = row.get('ipoDate')  # 有些数据版本可能没有该字段
+                    trade_status = row.get('tradeStatus', '1')  # 默认视为正常交易
+
+                    # 0. 首先过滤指数和ETF - 这是最重要的过滤
+                    # sh.000开头的都是指数
+                    if stock_code.startswith('sh.000'):
+                        continue
+                    
+                    # sz.399开头的都是深圳指数
+                    if stock_code.startswith('sz.399'):
+                        continue
+                    
+                    # 过滤ETF和基金代码段
+                    fund_prefixes = (
+                        'sh.51', 'sh.50', 'sh.52', 'sh.56', 'sh.58',
+                        'sz.15', 'sz.16', 'sz.17', 'sz.18', 'sz.159'
+                    )
+                    if stock_code.startswith(fund_prefixes):
+                        continue
+
+                    # 过滤名称中包含指数、ETF、基金等关键词的证券
+                    non_stock_keywords = ['指数', 'ETF', '基金', 'LOF', '债券', 'REITs']
+                    if any(keyword in stock_name for keyword in non_stock_keywords):
+                        continue
+
+                    # 1. 过滤次新股 (上市日期在 n 天之内)，若没有 ipoDate 字段则跳过此过滤
+                    if ipo_date_str:
+                        try:
+                            ipo_date = datetime.strptime(ipo_date_str, '%Y-%m-%d').date()
+                            if ipo_date > n_days_ago:
+                                continue
+                        except ValueError:
+                            # 无法解析上市日期，则不以此为依据过滤
+                            pass
+
+                    # 2. 过滤 ST, *ST, 退市股
+                    if trade_status == '3': # '3' 表示退市
+                        continue
+                    if any(keyword in stock_name for keyword in ['ST', '*', '退']):
+                        continue
+
+                    # 3. 过滤科创板 (688) 和 创业板 (300)
+                    if stock_code.startswith(('sh.688', 'sz.300')):
+                        continue
+
+                    # 4. 过滤停牌股 (tradeStatus == '2' 表示停牌)，若缺失该字段则默认正常交易
+                    if trade_status == '2':
+                        continue
+
+                    # 5. 只保留主板A股股票
+                    # 上海主板：sh.600, sh.601, sh.603
+                    # 深圳主板：sz.000, sz.001
+                    # 深圳中小板：sz.002
+                    valid_prefixes = ('sh.600', 'sh.601', 'sh.603', 'sz.000', 'sz.001', 'sz.002')
+                    if not stock_code.startswith(valid_prefixes):
+                        continue
+
+                    filtered_stock_codes.append(stock_code)
+        except Exception as e:
+            logger.error(f"过滤股票列表时发生错误: {str(e)}")
+            return []
+
+        logger.info(f"股票过滤完成，共保留 {len(filtered_stock_codes)} 只股票。")
+        return filtered_stock_codes
+
+    def screen_potential_stocks(self, n_recent_ipo_days: int = 60, bb_window: int = 20, bb_std: float = 2, gradient_lookback_days: int = 30) -> List[str]:
+        """
+        筛选潜力股票：
+        1. 过滤掉次新股、ST/退市股、科创板/创业板、停牌股。
+        2. 筛选出当前收盘价高于布林带上轨的股票。
+        3. 筛选出在指定时间段内股价斜率为正的股票（上升趋势）。
+        
+        :param n_recent_ipo_days: 过滤次新股的上市天数。
+        :param bb_window: 布林带计算的周期 (N)。
+        :param bb_std: 布林带的倍数 (P)。
+        :param gradient_lookback_days: 计算股价斜率所用的历史天数。
+        :return: 符合筛选条件的股票代码列表。
+        """
+        logger.info("开始筛选潜力股票...")
+        
+        # 第一步：初步过滤股票
+        initial_filtered_codes = self.filter_stocks_baostock(n=n_recent_ipo_days)
+        if not initial_filtered_codes:
+            logger.warning("初步过滤后没有股票，停止潜力股票筛选。")
+            return []
+            
+        logger.info(f"初步过滤后共有 {len(initial_filtered_codes)} 只股票进入第二阶段筛选。")
+        
+        selected_stocks = []
+        total_stocks_to_screen = len(initial_filtered_codes)
+        
+        try:
+            with BaostockClient() as client:
+                for i, code in enumerate(initial_filtered_codes):
+                    logger.info(f"[{i + 1}/{total_stocks_to_screen}] 正在对股票 {code} 进行布林带和斜率筛选...")
+                    
+                    # 获取足够历史数据用于布林带和斜率计算
+                    # 需要确保获取的数据量足以覆盖 bb_window 和 gradient_lookback_days 中更大的一个
+                    required_days = max(bb_window, gradient_lookback_days) * 2 + 10 # 额外加一些天数以防非交易日
+                    end_date = datetime.now().strftime('%Y-%m-%d')
+                    start_date_obj = datetime.now() - timedelta(days=required_days)
+                    start_date = start_date_obj.strftime('%Y-%m-%d')
+
+                    df = client.get_stock_history(code, start_date, end_date)
+                    
+                    if df is None or df.empty:
+                        logger.warning(f"未能获取 {code} 的历史数据，跳过筛选。")
+                        continue
+                    
+                    # 确保数据为数值类型并按日期排序
+                    df['close'] = pd.to_numeric(df['close'], errors='coerce')
+                    df = df.dropna(subset=['close']).sort_values(by='date')
+                    
+                    # 确保有足够数据进行计算
+                    if len(df) < required_days:
+                        logger.warning(f"股票 {code} 数据不足 {required_days} 天，无法进行精确筛选，跳过。")
+                        continue
+
+                    # --- 布林带筛选 ---
+                    # 取最近的 bb_window 数据进行布林带计算
+                    bb_df = df.tail(bb_window)
+                    if len(bb_df) < bb_window: # 再次检查是否有足够数据
+                         logger.warning(f"股票 {code} 计算布林带数据不足 {bb_window} 天，跳过。")
+                         continue
+
+                    bb_ma = bb_df['close'].rolling(window=bb_window).mean()
+                    bb_std_dev = bb_df['close'].rolling(window=bb_window).std()
+                    upper_band = bb_ma + bb_std * bb_std_dev
+                    
+                    # 检查最新价格是否高于布林带上轨
+                    current_close = df.iloc[-1]['close']
+                    current_upper_band = upper_band.iloc[-1]
+                    
+                    if not (current_close > current_upper_band):
+                        # logger.info(f"股票 {code} 不符合布林带上轨条件。")
+                        continue # 不符合布林带条件则跳过
+
+                    # --- 斜率筛选 ---
+                    # 取最近的 gradient_lookback_days 数据进行斜率计算
+                    gradient_prices = df['close'].tail(gradient_lookback_days)
+                    if len(gradient_prices) < gradient_lookback_days:
+                        logger.warning(f"股票 {code} 计算斜率数据不足 {gradient_lookback_days} 天，跳过。")
+                        continue
+
+                    gradient_value = TechnicalIndicators.calculate_gradient(gradient_prices)
+                    
+                    if gradient_value > 0: # 仅当斜率为正时才加入
+                        selected_stocks.append(code)
+                        logger.info(f"股票 {code} 同时符合布林带上轨和正斜率条件！")
+
+                    # 智能休眠，避免请求过快
+                    sleep_time = random.uniform(0.1, 0.5) # 适当缩短休眠时间，因为这里请求量可能较大
+                    time.sleep(sleep_time)
+
+        except Exception as e:
+            logger.error(f"筛选潜力股票时发生错误: {str(e)}", exc_info=True)
+            return []
+            
+        logger.info(f"潜力股票筛选完成，共找到 {len(selected_stocks)} 只符合条件的股票。")
+        return selected_stocks 

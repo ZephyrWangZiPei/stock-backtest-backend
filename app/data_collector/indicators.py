@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from typing import Dict, Any
+from sklearn import linear_model
 
 class TechnicalIndicators:
     """技术指标计算"""
@@ -72,6 +73,30 @@ class TechnicalIndicators:
             'j': j
         }
     
+    @staticmethod
+    def calculate_gradient(price_arr: pd.Series) -> float:
+        """计算股价斜率"""
+        if len(price_arr) < 2:
+            return 0.0 # 数据点太少无法计算斜率
+
+        # 归一化数据
+        min_val = np.min(price_arr)
+        max_val = np.max(price_arr)
+        
+        if (max_val - min_val) == 0: # 避免除以零，股价无波动
+            return 0.0
+
+        Y = ((price_arr - min_val) / (max_val - min_val)).values
+        
+        # 创建横坐标，统一到 [0, 1]
+        X = np.linspace(0, 1, len(price_arr)).reshape(-1, 1)
+        
+        regr = linear_model.LinearRegression()
+        regr.fit(X, Y)
+        
+        # 返回线性回归的系数，即斜率。这里不除以长度，直接使用回归系数
+        return regr.coef_[0]
+
     @staticmethod
     def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         """为数据框添加所有技术指标"""

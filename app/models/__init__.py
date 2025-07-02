@@ -6,6 +6,7 @@ from .strategy import Strategy
 from .update_log import UpdateLog
 from .backtest import BacktestResult, BacktestTrade
 from .candidate_stock import CandidateStock
+from .top_strategy_stock import TopStrategyStock
 
 __all__ = [
     'Stock',
@@ -16,5 +17,6 @@ __all__ = [
     'UpdateLog',
     'BacktestResult',
     'BacktestTrade',
-    'CandidateStock'
+    'CandidateStock',
+    'TopStrategyStock'
 ] 

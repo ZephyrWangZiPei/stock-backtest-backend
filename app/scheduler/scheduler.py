@@ -14,7 +14,8 @@ from .jobs import (
     daily_data_update_job, 
     stock_list_update_job, 
     data_cleanup_job,
-    realtime_data_push_job
+    realtime_data_push_job,
+    top_strategy_backtest_job
 )
 
 # Import of emit_scheduler_status_job is removed from here
@@ -99,6 +100,16 @@ class TaskScheduler:
                          misfire_grace_time=3600
                      )
                      logger.info("已添加并立即执行手动海选任务。")
+                elif job_id == 'top_strategy_backtest':
+                     from app.jobs.top_strategy_backtest_job import update_top_strategy_stocks
+                     self.scheduler.add_job(
+                         func=update_top_strategy_stocks, 
+                         id='top_strategy_backtest_manual', 
+                         name='手动执行Top策略回测', 
+                         replace_existing=True, 
+                         misfire_grace_time=3600
+                     )
+                     logger.info("已添加并立即执行手动Top策略回测任务。")
                 else:
                     logger.error(f"无法找到或执行未知的任务ID: {job_id}")
 
@@ -293,6 +304,7 @@ class TaskScheduler:
             ("weekend_data_cleanup", self.add_weekend_data_cleanup_job),
             ("monthly_stock_list_update", self.add_stock_list_update_job),
             ("realtime_data_push", self.add_realtime_data_push_job),
+            ("top_strategy_backtest", self.add_top_strategy_backtest_job),
         ]
         for job_id, add_func in core_jobs:
             if not self.scheduler.get_job(job_id):
@@ -322,6 +334,30 @@ class TaskScheduler:
         )
         
         logger.info("实时行情推送任务已添加")
+        self._emit_scheduler_status() # 立即推送状态
+        return job
+
+    def add_top_strategy_backtest_job(self):
+        """添加Top策略回测任务"""
+        # 每周六凌晨3点执行（避开交易时间，给足够时间处理）
+        trigger = CronTrigger(
+            day_of_week='sat',  # 周六
+            hour=3,
+            minute=0,
+            timezone=pytz.timezone('Asia/Shanghai')
+        )
+        
+        job = self.add_job(
+            func=top_strategy_backtest_job,
+            trigger=trigger,
+            id='top_strategy_backtest',
+            name='Top策略回测',
+            replace_existing=True,
+            max_instances=1,  # 确保同时只有一个实例运行
+            misfire_grace_time=3600  # 如果错过执行时间，1小时内仍可执行
+        )
+        
+        logger.info("Top策略回测任务已添加")
         self._emit_scheduler_status() # 立即推送状态
         return job
 

@@ -10,52 +10,54 @@ def emit_scheduler_status_job():
     It dynamically imports app components to avoid circular dependencies at startup.
     """
     try:
-        # Get the current Flask app and its bound scheduler instance
-        app = current_app._get_current_object()
-        if not hasattr(app, 'scheduler'):
-            logger.error("Flask app does not have scheduler attribute in 'emit_scheduler_status_job'.")
-            return
+        # 动态导入避免循环依赖
+        from app import create_app, socketio
+        
+        # 创建应用上下文
+        app = create_app()
+        
+        with app.app_context():
+            if not hasattr(app, 'scheduler'):
+                logger.error("Flask app does not have scheduler attribute in 'emit_scheduler_status_job'.")
+                return
+                
+            scheduler = app.scheduler
             
-        scheduler = app.scheduler
-        
-        # Dynamically import socketio to avoid circular dependencies
-        from app import socketio
-        
-        # Now that we are in a context, we can safely use socketio and scheduler
-        if not socketio or not scheduler.scheduler:
-            logger.warning("Scheduler or SocketIO not available in 'emit_scheduler_status_job'.")
-            return
-        
-        is_running = scheduler.scheduler.running
-        
-        jobs_data = []
-        jobs_in_store = scheduler.get_jobs()
-        
-        for job in jobs_in_store:
-            live_job = scheduler.scheduler.get_job(job.id)
-            next_run_time = None
-            if live_job and hasattr(live_job, 'next_run_time') and live_job.next_run_time:
-                next_run_time = live_job.next_run_time
-            elif hasattr(job, 'trigger'):
-                now = datetime.now(job.trigger.timezone)
-                next_run_time = job.trigger.get_next_fire_time(None, now)
+            # Now that we are in a context, we can safely use socketio and scheduler
+            if not socketio or not scheduler.scheduler:
+                logger.warning("Scheduler or SocketIO not available in 'emit_scheduler_status_job'.")
+                return
+            
+            is_running = scheduler.scheduler.running
+            
+            jobs_data = []
+            jobs_in_store = scheduler.get_jobs()
+            
+            for job in jobs_in_store:
+                live_job = scheduler.scheduler.get_job(job.id)
+                next_run_time = None
+                if live_job and hasattr(live_job, 'next_run_time') and live_job.next_run_time:
+                    next_run_time = live_job.next_run_time
+                elif hasattr(job, 'trigger'):
+                    now = datetime.now(job.trigger.timezone)
+                    next_run_time = job.trigger.get_next_fire_time(None, now)
 
-            jobs_data.append({
-                'id': job.id,
-                'name': job.name,
-                'next_run_time': next_run_time.strftime('%Y-%m-%d %H:%M:%S') if next_run_time else None,
-                'trigger': str(job.trigger)
-            })
+                jobs_data.append({
+                    'id': job.id,
+                    'name': job.name,
+                    'next_run_time': next_run_time.strftime('%Y-%m-%d %H:%M:%S') if next_run_time else None,
+                    'trigger': str(job.trigger)
+                })
+                
+            status_data = {
+                'is_running': is_running,
+                'jobs_count': len(jobs_in_store),
+                'current_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'jobs': jobs_data
+            }
             
-        status_data = {
-            'is_running': is_running,
-            'jobs_count': len(jobs_in_store),
-            'current_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'jobs': jobs_data
-        }
-        
-        # Use the global socketio instance to emit
-        socketio.emit('scheduler_update', {'data': status_data})
+            # Use the global socketio instance to emit
+            socketio.emit('scheduler_update', {'data': status_data})
     except Exception as e:
         logger.error(f"Error in scheduled job 'emit_scheduler_status_job': {e}", exc_info=True)
 
@@ -137,4 +139,25 @@ def realtime_data_push_job():
             logger.info("没有找到需要推送的股票")
             
     except Exception as e:
-        logger.error(f"实时行情推送任务失败: {e}") 
+        logger.error(f"实时行情推送任务失败: {e}")
+
+def top_strategy_backtest_job():
+    """
+    Top策略回测任务
+    对潜力股进行多策略回测，计算各策略胜率最高的前N只股票并保存到数据库
+    """
+    try:
+        app = current_app._get_current_object()
+        
+        # 动态导入避免循环依赖
+        from app.jobs.top_strategy_backtest_job import update_top_strategy_stocks
+        
+        logger.info("开始执行Top策略回测任务")
+        
+        # 执行回测任务，使用默认参数
+        update_top_strategy_stocks()
+        
+        logger.info("Top策略回测任务执行完成")
+        
+    except Exception as e:
+        logger.error(f"Top策略回测任务执行失败: {e}", exc_info=True) 

@@ -176,8 +176,10 @@ class BacktestEngine:
                     stock_code = buy_op['code']
                     current_price = buy_op['row']['close_price']
                     
-                    quantity = int(capital_per_buy // current_price)
-                    if quantity > 0:
+                    # 上海深圳市场以100股为最小交易单位，确保买入数量是100的整数倍
+                    raw_qty = int(capital_per_buy // current_price)
+                    quantity = (raw_qty // 100) * 100
+                    if quantity >= 100:
                         positions[stock_code] = quantity
                         trade_amount = current_price * quantity
                         cash -= trade_amount

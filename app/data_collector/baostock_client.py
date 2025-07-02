@@ -44,24 +44,43 @@ class BaostockClient:
     def get_all_stocks(self, trade_date: str = None) -> pd.DataFrame:
         """
         获取指定交易日的所有股票列表
-        :param trade_date: 交易日期，格式 YYYY-MM-DD，如果为None则获取最新交易日
+        :param trade_date: 交易日期，格式 YYYY-MM-DD，如果为None则使用一个确定的历史交易日
         :return: 包含股票代码和名称的DataFrame
         """
         if not self._is_logged_in:
             raise ConnectionError("BaoStock is not logged in.")
             
         if trade_date is None:
-            trade_date = datetime.now().strftime('%Y-%m-%d')
+            # 使用一个确定的历史交易日，避免非交易日问题
+            trade_date = "2024-12-31"
             
         rs = self.bs.query_all_stock(day=trade_date)
+        if rs.error_code != '0':
+            logger.error(f"查询股票列表失败: {rs.error_msg}")
+            return pd.DataFrame()
+            
         data_list = []
         while (rs.error_code == '0') & rs.next():
             data_list.append(rs.get_row_data())
         
+        if not data_list:
+            logger.warning(f"在交易日 {trade_date} 未获取到任何股票数据")
+            return pd.DataFrame()
+            
         df = pd.DataFrame(data_list, columns=rs.fields)
-        # 筛选出股票（tradeStatus为1表示正常交易）
-        df = df[(df['tradeStatus'] == '1') & (~df['code_name'].str.contains('ST'))]
-        return df[['code', 'code_name']]
+
+        # 若查询字段缺失 tradeStatus，则填充默认 '1'
+        if 'tradeStatus' not in df.columns:
+            df['tradeStatus'] = '1'
+
+        # 移除内部过滤逻辑，让外部的filter_stocks_baostock方法来处理
+        # 这里只返回原始数据
+        
+        # 确保列存在再返回
+        base_cols = ['code', 'code_name', 'tradeStatus']
+        if 'ipoDate' in df.columns:
+            base_cols.append('ipoDate')
+        return df[base_cols]
 
     def get_stock_basic_info(self, code: str) -> Optional[pd.DataFrame]:
         """
