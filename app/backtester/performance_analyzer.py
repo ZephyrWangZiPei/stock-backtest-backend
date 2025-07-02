@@ -92,8 +92,10 @@ def calculate_trade_statistics(trades: list, stock_codes: list) -> dict:
         elif trade['trade_type'] == 'sell':
             if buy_queues[stock_code]:
                 buy_trade = buy_queues[stock_code].pop(0) # FIFO
-                # 假设整笔买入被整笔卖出
-                profit = (trade['price'] - buy_trade['price']) * buy_trade['quantity']
+                # 考虑滑点后的实际成交差价，并扣除买卖双方佣金
+                price_diff = (trade['price'] - buy_trade['price']) * buy_trade['quantity']
+                commission_cost = float(trade.get('commission', 0.0) or 0.0) + float(buy_trade.get('commission', 0.0) or 0.0)
+                profit = price_diff - commission_cost
                 if profit > 0:
                     winning_trades += 1
                     total_profit += profit

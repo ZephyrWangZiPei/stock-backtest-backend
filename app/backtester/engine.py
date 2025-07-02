@@ -14,7 +14,8 @@ class BacktestEngine:
     """
     回测引擎，负责执行策略、模拟交易并记录结果。
     """
-    def __init__(self, strategy_id: int, start_date: str, end_date: str, initial_capital: float, stock_codes: list, custom_parameters: dict = None):
+    def __init__(self, strategy_id: int, start_date: str, end_date: str, initial_capital: float, stock_codes: list,
+                 custom_parameters: dict = None, commission_rate: float = 0.0008, slippage: float = 0.0005):
         """
         初始化回测引擎。
         :param strategy_id: 策略ID
@@ -23,12 +24,16 @@ class BacktestEngine:
         :param initial_capital: 初始资金
         :param stock_codes: 股票代码列表，例如 ['sh.600036', 'sz.000001']
         :param custom_parameters: 用户自定义的策略参数
+        :param commission_rate: 交易佣金率
+        :param slippage: 滑点比例
         """
         self.strategy_model = Strategy.query.get_or_404(strategy_id)
         self.start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
         self.end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
         self.initial_capital = float(initial_capital)
         self.stock_codes = stock_codes
+        self.commission_rate = commission_rate  # 例如 0.0008 ≈ 8bps
+        self.slippage = slippage  # 0.05% 价差
         
         # 优先使用传入的自定义参数，否则使用数据库中存储的默认参数
         if custom_parameters is not None:
@@ -73,8 +78,15 @@ class BacktestEngine:
         # 计算交易统计数据
         trade_statistics = calculate_trade_statistics(trades, self.stock_codes)
 
+        # 计算每笔期望收益率（Expectancy）
+        trade_count = trade_statistics.get('total_trades', 0)
+        if trade_count > 0:
+            expectancy = total_return / trade_count
+        else:
+            expectancy = 0.0
+
         # 合并所有指标
-        all_metrics = {**performance_metrics, **trade_statistics}
+        all_metrics = {**performance_metrics, **trade_statistics, 'expectancy': expectancy}
 
         logger.info(f"回测完成。最终资产: {final_value:.2f}, 总回报率: {total_return:.2%}, 年化回报率: {all_metrics['annualized_return']:.2%}, 夏普比率: {all_metrics['sharpe_ratio']:.2f}, 最大回撤: {all_metrics['max_drawdown']:.2%}, 胜率: {all_metrics['win_rate']:.2%}")
 
@@ -143,15 +155,19 @@ class BacktestEngine:
                     signal = day_signal_row.iloc[0]['signal']
                     if signal == 'sell':
                         current_price = day_signal_row.iloc[0]['close_price']
-                        
+
+                        # 应用滑点：卖出则以略低价格成交
+                        executed_price = current_price * (1 - self.slippage)
                         quantity_to_sell = positions[stock_code]
-                        trade_amount = current_price * quantity_to_sell
-                        cash += trade_amount
+                        trade_amount = executed_price * quantity_to_sell
+                        commission = trade_amount * self.commission_rate
+                        cash += trade_amount - commission
                         positions[stock_code] = 0
-                        
+
                         trades.append({
                             'stock_code': stock_code, 'date': trade_date, 'trade_type': 'sell',
-                            'price': current_price, 'quantity': quantity_to_sell, 'amount': trade_amount, 'cash_after': cash
+                            'price': executed_price, 'quantity': quantity_to_sell, 'amount': trade_amount,
+                            'commission': commission, 'cash_after': cash
                         })
                         logger.debug(f"[{trade_date}] 卖出 {stock_code}: {quantity_to_sell} 股 @ {current_price}, 现金: {cash:.2f}")
 
@@ -175,17 +191,22 @@ class BacktestEngine:
                 for buy_op in buy_signals_today:
                     stock_code = buy_op['code']
                     current_price = buy_op['row']['close_price']
-                    
+
+                    # 应用滑点：买入则以略高价格成交
+                    executed_price = current_price * (1 + self.slippage)
+
                     # 上海深圳市场以100股为最小交易单位，确保买入数量是100的整数倍
-                    raw_qty = int(capital_per_buy // current_price)
+                    raw_qty = int(capital_per_buy // executed_price)
                     quantity = (raw_qty // 100) * 100
                     if quantity >= 100:
                         positions[stock_code] = quantity
-                        trade_amount = current_price * quantity
-                        cash -= trade_amount
+                        trade_amount = executed_price * quantity
+                        commission = trade_amount * self.commission_rate
+                        cash -= (trade_amount + commission)
                         trades.append({
                             'stock_code': stock_code, 'date': trade_date, 'trade_type': 'buy',
-                            'price': current_price, 'quantity': quantity, 'amount': trade_amount, 'cash_after': cash
+                            'price': executed_price, 'quantity': quantity, 'amount': trade_amount,
+                            'commission': commission, 'cash_after': cash
                         })
                         logger.debug(f"[{trade_date}] 买入 {stock_code}: {quantity} 股 @ {current_price}, 现金: {cash:.2f}")
 
@@ -203,6 +224,50 @@ class BacktestEngine:
             portfolio_history.append({'date': trade_date, 'total': current_portfolio_value})
 
         logger.info("交易模拟结束。")
+        # ===== 强制平仓：在回测结束时将所有未平仓头寸按最后一个交易日收盘价全部卖出 =====
+        if positions and any(qty > 0 for qty in positions.values()):
+            last_trade_date = sorted(all_stocks_data['trade_date'].unique())[-1]
+
+            for stock_code, qty in positions.items():
+                if qty <= 0:
+                    continue
+
+                # 获取最后一个交易日的收盘价
+                last_price_series = all_stocks_data[
+                    (all_stocks_data['trade_date'] == last_trade_date) &
+                    (all_stocks_data['stock_code'] == stock_code)
+                ]['close_price']
+
+                if last_price_series.empty:
+                    logger.warning(f"无法获取 {stock_code} 在 {last_trade_date} 的收盘价，跳过强制平仓。")
+                    continue
+
+                last_price = last_price_series.iloc[0]
+
+                executed_price = last_price * (1 - self.slippage)
+                trade_amount = qty * executed_price
+                commission = trade_amount * self.commission_rate
+                cash += trade_amount - commission
+
+                trades.append({
+                    'stock_code': stock_code,
+                    'date': last_trade_date,
+                    'trade_type': 'sell',
+                    'price': executed_price,
+                    'quantity': qty,
+                    'amount': trade_amount,
+                    'commission': commission,
+                    'cash_after': cash
+                })
+
+                positions[stock_code] = 0  # 头寸已清空
+
+            # 更新投资组合最终市值记录（覆盖最后一条记录）
+            if portfolio_history and portfolio_history[-1]['date'] == last_trade_date:
+                portfolio_history[-1]['total'] = cash
+            else:
+                portfolio_history.append({'date': last_trade_date, 'total': cash})
+
         return pd.DataFrame(portfolio_history), trades
 
     def _save_results(self, portfolio_history: pd.DataFrame, trades: list, final_value, total_return, metrics: dict) -> int:
@@ -223,7 +288,8 @@ class BacktestEngine:
             winning_trades=metrics.get('winning_trades'),
             losing_trades=metrics.get('losing_trades'),
             win_rate=metrics.get('win_rate'),
-            # profit_factor 暂时不存，因为可能是无穷大
+            profit_factor=metrics.get('profit_factor'),
+            expectancy=metrics.get('expectancy'),
             parameters_used=self.parameters_to_save,
             portfolio_history=portfolio_history.to_json(orient='records', date_format='iso'),
             status='completed',
@@ -242,6 +308,7 @@ class BacktestEngine:
                 price=trade_data['price'],
                 quantity=trade_data['quantity'],
                 amount=trade_data['amount'],
+                commission=trade_data.get('commission', 0.0),
                 cash_after=trade_data['cash_after']
             )
             db.session.add(trade)

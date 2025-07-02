@@ -10,7 +10,7 @@ from app.strategies import STRATEGY_MAP
 
 logger = logging.getLogger(__name__)
 
-def update_top_strategy_stocks(strategies: list[str] = None, top_n: int = 5, period_days: int = 365, initial_capital: float = 100000):
+def update_top_strategy_stocks(strategies: list[str] = None, top_n: int = 5, period_days: int = 365, initial_capital: float = 100000, min_trade_count: int = 3):
     """
     执行多策略回测任务，计算各策略胜率最高的前N只股票并保存到数据库。
     此函数会自动创建并运行在它自己的Flask应用上下文中。
@@ -107,6 +107,10 @@ def update_top_strategy_stocks(strategies: list[str] = None, top_n: int = 5, per
                         
                         win_rate = float(result.win_rate)
                         trade_count = result.total_trades or 0
+                        if trade_count < min_trade_count:
+                            # 交易次数不足，忽略该股票
+                            continue
+                        
                         # Wilson score lower bound at 95% confidence
                         def wilson_lb(p: float, n: int, z: float = 1.96):
                             if n == 0:
@@ -122,14 +126,16 @@ def update_top_strategy_stocks(strategies: list[str] = None, top_n: int = 5, per
                         if len(top_list) < top_n:
                             top_list.append({'code': code, 'score': score, 'result': result,
                                              'trade_count': trade_count, 'win_rate_lb': win_rate_lb,
-                                             'expectancy': expectancy})
+                                             'expectancy': expectancy,
+                                             'profit_factor': float(result.profit_factor) if result.profit_factor else None})
                         else:
                             min_entry = min(top_list, key=lambda x: x['score'])
                             if score > min_entry['score']:
                                 top_list.remove(min_entry)
                                 top_list.append({'code': code, 'score': score, 'result': result,
                                                  'trade_count': trade_count, 'win_rate_lb': win_rate_lb,
-                                                 'expectancy': expectancy})
+                                                 'expectancy': expectancy,
+                                                 'profit_factor': float(result.profit_factor) if result.profit_factor else None})
                                 
                     except Exception as e:
                         logger.error(f"回测 {code} 时出错: {e}")
@@ -162,7 +168,8 @@ def update_top_strategy_stocks(strategies: list[str] = None, top_n: int = 5, per
                         initial_capital=initial_capital,
                         trade_count=entry['trade_count'],
                         win_rate_lb=entry['win_rate_lb'],
-                        expectancy=entry['expectancy']
+                        expectancy=entry['expectancy'],
+                        profit_factor=entry.get('profit_factor')
                     )
                     db.session.add(top_stock)
                 

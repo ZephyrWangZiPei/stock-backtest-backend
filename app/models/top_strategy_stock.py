@@ -19,6 +19,7 @@ class TopStrategyStock(db.Model):
     trade_count = db.Column(db.Integer, comment='交易次数')
     win_rate_lb = db.Column(db.Numeric(10, 4), comment='胜率置信下界(95%)')
     expectancy = db.Column(db.Numeric(10, 4), comment='每笔期望收益率')
+    profit_factor = db.Column(db.Numeric(10, 4), comment='盈亏比')
     
     # 关联的BacktestResult ID
     backtest_result_id = db.Column(db.Integer, db.ForeignKey('backtest_results.id'), nullable=False)
@@ -62,6 +63,7 @@ class TopStrategyStock(db.Model):
             'trade_count': self.trade_count,
             'win_rate_lb': float(self.win_rate_lb) if self.win_rate_lb else None,
             'expectancy': float(self.expectancy) if self.expectancy else None,
+            'profit_factor': float(self.profit_factor) if self.profit_factor else None,
             'rank': self.rank,
             'backtest_result_id': self.backtest_result_id,
             'backtest_period_days': self.backtest_period_days,

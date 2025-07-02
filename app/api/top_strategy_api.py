@@ -147,11 +147,20 @@ class TopStocksStats(Resource):
             
             result = []
             for stat in strategy_stats:
+                # 安全转换日期
+                if stat.last_update:
+                    try:
+                        last_update_str = stat.last_update.isoformat()
+                    except AttributeError:
+                        last_update_str = str(stat.last_update)
+                else:
+                    last_update_str = None
+
                 result.append({
                     'strategy_name': stat.name,
                     'stock_count': stat.stock_count,
                     'avg_win_rate': float(stat.avg_win_rate) if stat.avg_win_rate else 0,
-                    'last_update': stat.last_update.isoformat() if stat.last_update else None
+                    'last_update': last_update_str
                 })
             
             total_stocks = db.session.query(TopStrategyStock).count()

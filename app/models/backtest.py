@@ -20,6 +20,8 @@ class BacktestResult(db.Model):
     annual_return = db.Column(db.Numeric(10, 4), comment='年化收益率')
     max_drawdown = db.Column(db.Numeric(10, 4), comment='最大回撤')
     sharpe_ratio = db.Column(db.Numeric(10, 4), comment='夏普比率')
+    profit_factor = db.Column(db.Numeric(10, 4), comment='盈亏比')
+    expectancy = db.Column(db.Numeric(10, 4), comment='每笔期望收益率')
     
     # 交易统计
     total_trades = db.Column(db.Integer, comment='总交易次数')
@@ -71,6 +73,8 @@ class BacktestResult(db.Model):
             'annual_return': float(self.annual_return) if self.annual_return else None,
             'max_drawdown': float(self.max_drawdown) if self.max_drawdown else None,
             'sharpe_ratio': float(self.sharpe_ratio) if self.sharpe_ratio else None,
+            'profit_factor': float(self.profit_factor) if self.profit_factor else None,
+            'expectancy': float(self.expectancy) if self.expectancy else None,
             'total_trades': self.total_trades,
             'winning_trades': self.winning_trades,
             'losing_trades': self.losing_trades,
