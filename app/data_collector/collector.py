@@ -151,6 +151,10 @@ class DataCollector:
         success_count = 0
         error_count = 0
         
+        # 批量提交相关配置
+        batch_size = 500  # 每批提交条数，可按需要调整
+        batch_objects = []
+        
         logger.info(f"即将处理 {total_stocks} 只股票...")
 
         try:
@@ -244,26 +248,25 @@ class DataCollector:
                             rsi_12=safe_float(row.get('rsi_12')),
                             rsi_24=safe_float(row.get('rsi_24'))
                         )
-                        db.session.add(daily_data)
-                        
-                        # 核心修改：将批处理提交改为逐条提交，确保健壮性
-                        try:
-                            db.session.commit()
-                            success_count += 1
-                        except IntegrityError as ie:
-                            db.session.rollback()
-                            logger.warning(f"股票 {stock.code} (日期: {date}) 数据已存在，跳过插入。错误: {ie}")
-                            # 不计入 error_count，因为这不是真正的数据获取失败
-                            continue
-                        except Exception as e_commit:
-                            db.session.rollback()  # 回滚失败的事务
-                            error_count += 1
-                            logger.error(f"提交股票 {stock.code} 数据失败: {e_commit}", exc_info=True)
-                            continue
-                        
-                        # 智能休眠
-                        sleep_time = random.uniform(0.3, 1.2)
-                        time.sleep(sleep_time)
+                        # 批量收集，按 batch_size 批量提交
+                        batch_objects.append(daily_data)
+                        success_count += 1
+
+                        if len(batch_objects) >= batch_size:
+                            try:
+                                db.session.bulk_save_objects(batch_objects)
+                                db.session.commit()
+                                batch_objects.clear()
+                            except IntegrityError as ie:
+                                db.session.rollback()
+                                error_count += len(batch_objects)
+                                logger.warning(f"批量提交出现完整性错误，部分记录可能已存在: {ie}")
+                                batch_objects.clear()
+                            except Exception as e_commit:
+                                db.session.rollback()
+                                error_count += len(batch_objects)
+                                logger.error(f"批量提交失败: {e_commit}", exc_info=True)
+                                batch_objects.clear()
 
                         # 进度回调 (改为每次都调用)
                         if progress_callback:
@@ -273,12 +276,9 @@ class DataCollector:
                                 'message': f"处理完毕: {stock.code} ({i + 1}/{total_stocks})"
                             })
 
-                        # 每100条进行一次长时间休眠
-                        if (i + 1) % 100 == 0:
-                            # 长时间休眠
-                            long_sleep_time = random.uniform(5, 10)
-                            logger.info(f"批处理节点，休眠 {long_sleep_time:.2f} 秒...")
-                            time.sleep(long_sleep_time)
+                        # 每 500 条后可选择短暂休息以避免限速
+                        if (i + 1) % batch_size == 0:
+                            time.sleep(random.uniform(1, 2))
 
                     except Exception as e:
                         db.session.rollback() # 仅回滚当前失败的单个事务
@@ -305,6 +305,22 @@ class DataCollector:
                     'progress': 100,
                     'message': f"更新失败: {str(e)}，成功 {success_count} 只，失败 {error_count} 只"
                 })
+
+        # 提交剩余未提交的批次
+        if batch_objects:
+            try:
+                db.session.bulk_save_objects(batch_objects)
+                db.session.commit()
+            except IntegrityError as ie:
+                db.session.rollback()
+                error_count += len(batch_objects)
+                logger.warning(f"最终批量提交出现完整性错误，部分记录可能已存在: {ie}")
+            except Exception as e_commit:
+                db.session.rollback()
+                error_count += len(batch_objects)
+                logger.error(f"最终批量提交失败: {e_commit}", exc_info=True)
+            finally:
+                batch_objects.clear()
 
         # 由于已改为逐条提交，最后的commit不再需要
         logger.info(f"BaoStock日线数据更新完成: 成功 {success_count}, 失败 {error_count}")
