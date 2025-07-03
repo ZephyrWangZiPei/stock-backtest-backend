@@ -106,41 +106,6 @@ def data_cleanup_job():
     except Exception as e:
         logger.error(f"数据清理任务执行失败: {e}", exc_info=True)
 
-def realtime_data_push_job():
-    """
-    实时行情推送任务
-    定期获取热门股票的实时数据并通过WebSocket推送
-    """
-    logger = logging.getLogger(__name__)
-    
-    try:
-        # 动态导入避免循环依赖
-        from app import socketio
-        from app.websocket.events import broadcast_realtime_data
-        from app.models.stock import Stock
-        
-        if not socketio:
-            logger.warning("SocketIO not available in 'realtime_data_push_job'.")
-            return
-        
-        # 获取活跃的股票列表（这里可以根据业务需求调整）
-        # 例如：获取成交量最大的前20只股票，或者用户自选股等
-        popular_stocks = Stock.query.filter(
-            Stock.is_active == True,
-            Stock.code.like('sz.%')  # 先只推送深市股票作为示例
-        ).limit(10).all()
-        
-        stock_codes = [stock.code for stock in popular_stocks]
-        
-        if stock_codes:
-            logger.info(f"开始推送 {len(stock_codes)} 只股票的实时数据")
-            broadcast_realtime_data(socketio, stock_codes)
-        else:
-            logger.info("没有找到需要推送的股票")
-            
-    except Exception as e:
-        logger.error(f"实时行情推送任务失败: {e}")
-
 def top_strategy_backtest_job():
     """
     Top策略回测任务

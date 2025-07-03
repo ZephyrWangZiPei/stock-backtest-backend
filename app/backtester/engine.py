@@ -273,6 +273,9 @@ class BacktestEngine:
     def _save_results(self, portfolio_history: pd.DataFrame, trades: list, final_value, total_return, metrics: dict) -> int:
         """将回测结果保存到数据库。"""
         
+        # 收集选中股票的详细信息，方便后续回显
+        stocks_info = [s.to_dict() for s in Stock.query.filter(Stock.code.in_(self.stock_codes)).all()]
+
         # 主结果记录
         result = BacktestResult(
             strategy_id=self.strategy_model.id,
@@ -295,6 +298,10 @@ class BacktestEngine:
             status='completed',
             completed_at=datetime.utcnow()
         )
+
+        # 保存选中的股票 JSON
+        result.set_selected_stocks(stocks_info)
+
         db.session.add(result)
         db.session.flush()
 

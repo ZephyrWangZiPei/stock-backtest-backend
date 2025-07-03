@@ -35,167 +35,150 @@ class DataUpdateTask:
         else:
             logger.warning("⚠️ SocketIO实例为空，无法发送事件")
     
-    def update_daily_data(self, date: str = None, sid: str = None) -> Dict[str, Any]:
+    def update_daily_data(self, date_str: str = None, sid: str = None) -> Dict[str, Any]:
         """
-        更新每日数据
-        
+        更新每日数据。
+        如果未指定日期 (date_str为None)，则自动检测数据库中缺失的交易日数据并进行更新。
         Args:
-            date: 指定日期，格式为 YYYY-MM-DD，如果为None则使用当前日期
-            
+            date_str: 指定日期，格式为 YYYY-MM-DD，如果为None则自动检测缺失日期
+            sid: WebSocket session ID，用于发送进度
         Returns:
             包含更新结果的字典
         """
         with self.app.app_context():
-            try:
-                if not date:
-                    # 如果未指定日期，则检查数据库中最新的数据日期
-                    latest_date_in_db = db.session.query(func.max(DailyData.trade_date)).scalar()
-                    today = datetime.now().date()
+            updated_count = 0
+            error_count = 0
+            # 获取总股票数，用于判断数据是否完整
+            total_stocks = db.session.query(Stock).count()
+            if total_stocks == 0:
+                message = "数据库中没有股票信息，请先更新股票列表。"
+                logger.warning(message)
+                self._emit_progress('update_error', {'task': 'update_daily_data', 'message': message}, sid=sid)
+                return {'success': False, 'message': message, 'data': None}
 
-                    if latest_date_in_db is None:
-                        # 如果数据库为空，从一个合理的历史点开始，比如昨天
-                        target_date = today - timedelta(days=1)
+            try:
+                dates_to_update = []
+                if date_str:
+                    # 如果指定了日期，则只更新该日期
+                    dates_to_update.append(date_str)
+                else:
+                    # 自动检测缺失日期
+                    latest_date_in_db = db.session.query(func.max(DailyData.trade_date)).scalar()
+                    logger.info(f"DEBUG: latest_date_in_db: {latest_date_in_db}")
+
+                    today = datetime.now().date()
+                    logger.info(f"DEBUG: today: {today}")
+
+                    start_date_to_process = None
+
+                    if latest_date_in_db:
+                        # Check if the latest_date_in_db's data is complete
+                        daily_data_count_latest = db.session.query(DailyData).filter_by(trade_date=latest_date_in_db).count()
+                        logger.info(f"DEBUG: For latest_date_in_db ({latest_date_in_db}), count: {daily_data_count_latest}, total_stocks: {total_stocks}")
+                        
+                        if daily_data_count_latest < total_stocks:
+                            # If latest date in DB is incomplete, start processing from that date
+                            start_date_to_process = latest_date_in_db
+                            logger.info(f"DEBUG: Latest date {latest_date_in_db} is incomplete. Starting processing from it.")
+                        else:
+                            # If latest date in DB is complete, start processing from the next day
+                            start_date_to_process = latest_date_in_db + timedelta(days=1)
+                            logger.info(f"DEBUG: Latest date {latest_date_in_db} is complete. Starting processing from next day.")
                     else:
-                        # 如果最新数据是今天，则任务完成
-                        if latest_date_in_db >= today:
-                             message = "数据已经是最新，无需更新。"
-                             logger.info(message)
-                             self._emit_progress('update_complete', {
-                                'task': 'update_daily_data',
-                                'progress': 100,
-                                'message': message,
-                                'success': True,
-                                'data': {'updated_count': 0}
-                            }, sid=sid)
-                             return {'success': True, 'message': message}
-                        # 否则，目标是更新昨天的数据
-                        target_date = today - timedelta(days=1)
+                        # If no data in DB, start from a reasonable past date, e.g., 30 days ago
+                        start_date_to_process = today - timedelta(days=30)
+                        logger.info(f"DEBUG: No data in DB. Starting processing from {start_date_to_process} (30 days ago).")
                     
-                    date = target_date.strftime('%Y-%m-%d')
+                    logger.info(f"DEBUG: Calculated start_date_to_process: {start_date_to_process}")
+
+                    current_check_date = start_date_to_process
+                    while current_check_date <= today:
+                        date_str_to_check = current_check_date.strftime('%Y-%m-%d')
+                        is_trading_day = self._is_trading_day(date_str_to_check)
+                        logger.info(f"DEBUG: Checking date {date_str_to_check}. Is trading day: {is_trading_day}")
+                        
+                        if is_trading_day:
+                            # 检查该日期的数据是否完整（已入库的股票数量是否等于总股票数量）
+                            daily_data_count = db.session.query(DailyData).filter_by(trade_date=current_check_date).count()
+                            logger.info(f"DEBUG: For {date_str_to_check}, daily_data_count: {daily_data_count}, total_stocks: {total_stocks}")
+                            
+                            if daily_data_count < total_stocks:
+                                dates_to_update.append(date_str_to_check)
+                                logger.info(f"DEBUG: Added {date_str_to_check} to dates_to_update. Current list: {dates_to_update}")
+                            else:
+                                logger.info(f"DEBUG: {date_str_to_check} data is complete ({daily_data_count}/{total_stocks}). Skipping.")
+                        else:
+                            logger.info(f"DEBUG: {date_str_to_check} is not a trading day. Skipping.")
+                        current_check_date += timedelta(days=1)
                 
-                logger.info(f"开始更新 {date} 的数据")
+                logger.info(f"DEBUG: Final dates_to_update list before check: {dates_to_update}")
+                if not dates_to_update:
+                    message = "数据已经是最新，无需更新。"
+                    logger.info(message)
+                    self._emit_progress('update_complete', {
+                        'task': 'update_daily_data',
+                        'progress': 100,
+                        'message': message,
+                        'success': True,
+                        'data': {'updated_count': 0}
+                    }, sid=sid)
+                    return {'success': True, 'message': message, 'data': {'updated_count': 0}}
                 
-                # 更新日志为运行中
+                # Update log to running
                 try:
-                    UpdateLog.update_task_status('update_daily_data', 'running', '任务进行中...')
+                    UpdateLog.update_task_status('update_daily_data', 'running', f'正在更新 {len(dates_to_update)} 个交易日的数据...')
                 except Exception as _:
                     logger.warning("无法写入 UpdateLog (daily running)")
                 
-                # 检查是否为交易日
-                if not self._is_trading_day(date):
-                    message = f"{date} 不是交易日，跳过数据更新"
-                    logger.info(message)
-                    # 发送完成状态
-                    self._emit_progress('update_complete', {
-                        'task': 'update_daily_data',
-                        'progress': 100,
-                        'message': message,
-                        'success': True,
-                        'data': {'updated_count': 0}
-                    }, sid=sid)
-                    try:
-                        UpdateLog.update_task_status('update_daily_data', 'success', message)
-                    except Exception:
-                        logger.warning("无法写入 UpdateLog (daily skip)")
-                    return {
-                        'success': True,
-                        'message': message,
-                        'data': {'updated_count': 0}
-                    }
-                
-                # 定义进度回调函数
-                def progress_callback(progress_data):
-                    self._emit_progress('update_progress', progress_data, sid=sid)
+                # Iterate through dates to update
+                total_dates_to_process = len(dates_to_update)
+                for idx, target_date_str in enumerate(dates_to_update):
+                    logger.info(f"开始更新 {target_date_str} 的数据 ({idx + 1}/{total_dates_to_process})")
 
-                # 使用已有的数据收集器进行更新
-                result = self.collector.update_daily_data(date, progress_callback=progress_callback)
-                
-                logger.info(f"数据更新完成: {result}")
-                
-                # 记录更新日志
-                self._log_update_result('daily_data', date, result)
-                
-                # 检查是否是数据源无数据的情况
-                if result.get('message') and 'BaoStock暂无' in result.get('message', ''):
-                    # 这是数据源无数据的情况，不算错误
-                    self._emit_progress('update_complete', {
+                    # Define progress callback for each date
+                    def date_progress_callback(progress_data):
+                        # Augment progress data with overall task progress
+                        overall_progress = int(((idx + progress_data.get('progress', 0) / 100) / total_dates_to_process) * 100)
+                        self._emit_progress('update_progress', {
                         'task': 'update_daily_data',
-                        'progress': 100,
-                        'message': result['message'],
-                        'success': True,
-                        'data': result
+                            'date': target_date_str,
+                            'progress': overall_progress,
+                            'message': f"正在更新 {target_date_str}: {progress_data.get('message', '')}",
+                            'current_date_progress': progress_data.get('progress', 0)
                     }, sid=sid)
-                    try:
-                        UpdateLog.update_task_status('update_daily_data', 'success', result['message'])
-                    except Exception:
-                        logger.warning("无法写入 UpdateLog (daily skip)")
-                    return {
-                        'success': True,
-                        'message': result['message'],
-                        'data': result
-                    }
-                elif result.get('success', 0) > 0 or result.get('total', 0) > 0:
-                    # 有数据被处理
-                    success_message = f"成功更新 {date} 的数据: 成功 {result.get('success', 0)} 条, 失败 {result.get('error', 0)} 条"
-                    self._emit_progress('update_complete', {
-                        'task': 'update_daily_data',
-                        'progress': 100,
-                        'message': success_message,
-                        'success': True,
-                        'data': result
-                    }, sid=sid)
-                    try:
-                        UpdateLog.update_task_status('update_daily_data', 'success', success_message)
-                    except Exception:
-                        logger.warning("无法写入 UpdateLog (daily skip)")
-                    return {
-                        'success': True,
-                        'message': success_message,
-                        'data': result
-                    }
-                else:
-                    # 没有数据被处理，可能是其他问题
-                    error_message = f"更新 {date} 的数据时未处理任何股票"
-                    self._emit_progress('update_complete', {
-                        'task': 'update_daily_data',
-                        'progress': 100,
-                        'message': error_message,
-                        'success': False,
-                        'data': result
-                    }, sid=sid)
-                    try:
-                        UpdateLog.update_task_status('update_daily_data', 'error', error_message)
-                    except Exception:
-                        logger.warning("无法写入 UpdateLog (daily skip)")
-                    return {
-                        'success': False,
-                        'message': error_message,
-                        'data': result
-                    }
-                
-            except Exception as e:
-                error_message = f"更新失败: {str(e)}"
-                logger.error(f"更新每日数据失败: {str(e)}", exc_info=True)
-                self._emit_progress('update_error', {
-                    'task': 'update_daily_data',
-                    'message': error_message
-                }, sid=sid)
+                    
+                    result = self.collector.update_daily_data(target_date_str, progress_callback=date_progress_callback)
+                    
+                    if result.get('success'):
+                        updated_count += result.get('updated_count', 0)
+                        logger.info(f"{target_date_str} 数据更新成功: {result}")
+                        self._log_update_result('daily_data', target_date_str, result, status='success')
+                    else:
+                        error_count += 1
+                        logger.error(f"{target_date_str} 数据更新失败: {result.get('message', '未知错误')}")
+                        self._log_update_result('daily_data', target_date_str, result, status='error', message=result.get('message', ''))
+
+                message = f"每日数据更新完成: 成功 {updated_count} 条，失败 {error_count} 条。"
+                logger.info(message)
                 self._emit_progress('update_complete', {
                     'task': 'update_daily_data',
                     'progress': 100,
-                    'message': error_message,
-                    'success': False,
-                    'data': None
+                    'message': message,
+                    'success': True,
+                    'data': {'updated_count': updated_count, 'error_count': error_count}
                 }, sid=sid)
-                try:
-                    UpdateLog.update_task_status('update_daily_data', 'error', error_message)
-                except Exception:
-                    logger.warning("无法写入 UpdateLog (daily skip)")
-                return {
-                    'success': False,
-                    'message': error_message,
-                    'data': None
-                }
+                UpdateLog.update_task_status('update_daily_data', 'success', message)
+                return {'success': True, 'message': message, 'data': {'updated_count': updated_count, 'error_count': error_count}}
+                
+            except Exception as e:
+                message = f"每日数据更新任务失败: {str(e)}"
+                logger.error(message, exc_info=True)
+                self._emit_progress('update_error', {
+                    'task': 'update_daily_data',
+                    'message': message
+                }, sid=sid)
+                UpdateLog.update_task_status('update_daily_data', 'error', message)
+                return {'success': False, 'message': message, 'data': None}
     
     def update_stock_list(self, sid: str = None) -> Dict[str, Any]:
         """
@@ -530,7 +513,7 @@ class DataUpdateTask:
             
         return {'success': success_count, 'error': error_count}
     
-    def _log_update_result(self, task_type: str, date: str, result: dict):
+    def _log_update_result(self, task_type: str, date: str, result: dict, status: str = 'success', message: str = ''):
         """
         记录更新结果日志
         
@@ -538,16 +521,13 @@ class DataUpdateTask:
             task_type: 任务类型
             date: 日期
             result: 结果
+            status: 状态
+            message: 消息
         """
-        logger.info(f"Task: {task_type}, Date: {date}, Result: {result}")
+        logger.info(f"Task: {task_type}, Date: {date}, Result: {result}, Status: {status}, Message: {message}")
         
         # 写入 UpdateLog
         try:
-            status = 'success'
-            if isinstance(result, dict):
-                # 若明确带有 success 字段且为 False 则算 error
-                if result.get('success') is False or result.get('error', 0) > 0:
-                    status = 'error'
             UpdateLog.update_task_status(f"update_{task_type}", status, str(result))
         except Exception:
             logger.warning("无法写入 UpdateLog (generic)") 

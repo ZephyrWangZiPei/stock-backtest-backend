@@ -8,14 +8,14 @@ from app.models.update_log import UpdateLog
 
 logger = logging.getLogger(__name__)
 
-# HTTP蓝图仍然保留，用于处理非实时任务，如任务的增删改
-scheduler_bp = Blueprint('scheduler', __name__, url_prefix='/api/scheduler')
-
 def init_scheduler_api(app, scheduler: TaskScheduler):
     """
     初始化调度器API和WebSocket事件处理器。
     HTTP接口用于一次性操作（增删改），WebSocket用于状态同步和触发任务。
     """
+    # 创建新的蓝图实例（每次调用均独立，避免重复注册后再添加路由触发 AssertionError）
+    scheduler_bp = Blueprint('scheduler', __name__, url_prefix='/api/scheduler')
+
     socketio = scheduler.socketio
 
     # --- WebSocket 事件处理器 ---
@@ -67,7 +67,7 @@ def init_scheduler_api(app, scheduler: TaskScheduler):
             date = data.get('date') if data else None
             flask_app = current_app._get_current_object()
             task = DataUpdateTask(flask_app, socketio)
-            socketio.start_background_task(task.update_daily_data, date=date, sid=sid)
+            socketio.start_background_task(task.update_daily_data, date_str=date, sid=sid)
             logger.info(f"已通过WebSocket为客户端 {sid} 启动数据更新任务 (日期: {date or '今天'})")
         except Exception as e:
             logger.error(f"WebSocket - 手动更新每日数据失败: {e}", exc_info=True)
@@ -189,7 +189,7 @@ def init_scheduler_api(app, scheduler: TaskScheduler):
     # @scheduler_bp.route('/jobs', methods=['GET'])
     # @scheduler_bp.route('/status', methods=['GET'])
 
-    # 注册蓝图
+    # 注册蓝图（在所有路由与事件处理器定义完毕后）
     app.register_blueprint(scheduler_bp)
     
     return scheduler_bp 

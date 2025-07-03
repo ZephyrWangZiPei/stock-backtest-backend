@@ -247,8 +247,19 @@ class DataCollector:
                         db.session.add(daily_data)
                         
                         # 核心修改：将批处理提交改为逐条提交，确保健壮性
-                        db.session.commit()
-                        success_count += 1
+                        try:
+                            db.session.commit()
+                            success_count += 1
+                        except IntegrityError as ie:
+                            db.session.rollback()
+                            logger.warning(f"股票 {stock.code} (日期: {date}) 数据已存在，跳过插入。错误: {ie}")
+                            # 不计入 error_count，因为这不是真正的数据获取失败
+                            continue
+                        except Exception as e_commit:
+                            db.session.rollback()  # 回滚失败的事务
+                            error_count += 1
+                            logger.error(f"提交股票 {stock.code} 数据失败: {e_commit}", exc_info=True)
+                            continue
                         
                         # 智能休眠
                         sleep_time = random.uniform(0.3, 1.2)

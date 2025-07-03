@@ -19,7 +19,6 @@ class Stock(db.Model):
     
     # 关联关系
     daily_data = db.relationship('DailyData', backref='stock', lazy='dynamic')
-    watchlists = db.relationship('UserWatchlist', backref='stock', lazy='dynamic')
     
     def __repr__(self):
         return f'<Stock {self.code}: {self.name}>'

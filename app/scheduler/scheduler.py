@@ -14,8 +14,7 @@ from .jobs import (
     daily_data_update_job, 
     stock_list_update_job, 
     data_cleanup_job,
-    realtime_data_push_job,
-    top_strategy_backtest_job
+    top_strategy_backtest_job,
 )
 
 # Import of emit_scheduler_status_job is removed from here
@@ -303,7 +302,6 @@ class TaskScheduler:
             ("daily_data_update", self.add_daily_data_update_job),
             ("weekend_data_cleanup", self.add_weekend_data_cleanup_job),
             ("monthly_stock_list_update", self.add_stock_list_update_job),
-            ("realtime_data_push", self.add_realtime_data_push_job),
             ("top_strategy_backtest", self.add_top_strategy_backtest_job),
         ]
         for job_id, add_func in core_jobs:
@@ -313,29 +311,6 @@ class TaskScheduler:
                     logger.info(f"核心任务 {job_id} 缺失，已自动补充")
                 except Exception as e:
                     logger.error(f"自动补充核心任务 {job_id} 失败: {e}")
-    
-    def add_realtime_data_push_job(self):
-        """添加实时行情推送任务"""
-        # 交易时间内每5秒执行一次
-        trigger = CronTrigger(
-            second='*/5',  # 每5秒
-            hour='9-15',   # 交易时间 9:00-15:00
-            day_of_week='mon-fri',  # 工作日
-            timezone=pytz.timezone('Asia/Shanghai')
-        )
-        
-        job = self.add_job(
-            func=realtime_data_push_job,
-            trigger=trigger,
-            id='realtime_data_push',
-            name='实时行情推送',
-            replace_existing=True,
-            max_instances=1
-        )
-        
-        logger.info("实时行情推送任务已添加")
-        self._emit_scheduler_status() # 立即推送状态
-        return job
 
     def add_top_strategy_backtest_job(self):
         """添加Top策略回测任务"""
@@ -363,23 +338,11 @@ class TaskScheduler:
 
     def setup_jobs(self):
         """设置所有定时任务"""
+        logger.info("开始设置定时任务")
         
-        # ... existing jobs ...
-        
-        # 实时行情推送任务 - 每5秒执行一次（交易时间内）
-        self.scheduler.add_job(
-            func=realtime_data_push_job,
-            trigger='cron',
-            second='*/5',  # 每5秒
-            hour='9-15',   # 交易时间 9:00-15:00
-            day_of_week='mon-fri',  # 工作日
-            id='realtime_data_push',
-            name='实时行情推送',
-            replace_existing=True,
-            max_instances=1
-        )
-        
-        # ... existing code ...
+        # 示例任务设置（可根据需要添加更多任务）
+        # 这里可以添加其他系统任务的初始化
+        logger.info("定时任务设置完成")
 
 def run_backtest_task(backtest_id: int):
     """
