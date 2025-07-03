@@ -10,7 +10,7 @@ from app.strategies import STRATEGY_MAP
 
 logger = logging.getLogger(__name__)
 
-def update_top_strategy_stocks(strategies: list[str] = None, top_n: int = 5, period_days: int = 365, initial_capital: float = 100000, min_trade_count: int = 3):
+def update_top_strategy_stocks(strategies: list[str] = None, top_n: int = 5, period_days: int = 1095, initial_capital: float = 100000, min_trade_count: int = 3):
     """
     执行多策略回测任务，计算各策略胜率最高的前N只股票并保存到数据库。
     此函数会自动创建并运行在它自己的Flask应用上下文中。
@@ -190,7 +190,7 @@ def update_top_strategy_stocks(strategies: list[str] = None, top_n: int = 5, per
                 'job_name': 'top_strategy_backtest', 'status': 'failed', 'message': str(e)
             }, namespace='/scheduler')
 
-def backtest_potential_stocks(strategies: list[str] = None, top_n: int = 5, period_days: int = 365, initial_capital: float = 100000):
+def backtest_potential_stocks(strategies: list[str] = None, top_n: int = 5, period_days: int = 1095, initial_capital: float = 100000):
     """
     按给定策略对潜力股做回测，返回各策略胜率最高的前 N 只股票。
     此函数保留用于API直接调用，但建议使用定时任务 update_top_strategy_stocks。
