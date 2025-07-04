@@ -53,4 +53,8 @@ def init_api(app):
     # 初始化调度器API
     scheduler_bp = init_scheduler_api(app, app.scheduler)
     
+    # 初始化 AI 分析 WebSocket 事件
+    from .ai_analysis_ws import init_ai_analysis_ws
+    init_ai_analysis_ws(app)
+    
     return app 

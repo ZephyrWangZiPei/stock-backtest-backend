@@ -1,6 +1,7 @@
 from app import db
 from datetime import datetime
 import json
+from sqlalchemy.dialects.postgresql import JSONB
 
 class BacktestResult(db.Model):
     """回测结果表"""
@@ -48,6 +49,11 @@ class BacktestResult(db.Model):
     # 关联关系
     trades = db.relationship('BacktestTrade', backref='backtest_result', lazy='dynamic', cascade='all, delete-orphan')
     
+    # AI 分析报告字段
+    ai_analysis_report = db.Column(db.Text, nullable=True) # AI分析报告，可为空
+    
+    strategy = db.relationship('Strategy', backref=db.backref('backtest_results', lazy=True))
+    
     def __repr__(self):
         return f'<BacktestResult {self.id}: {self.strategy.name if self.strategy else "Unknown"}>'
     
@@ -87,7 +93,8 @@ class BacktestResult(db.Model):
             'parameters_used': json.loads(self.parameters_used) if self.parameters_used else {},
             'portfolio_history': json.loads(self.portfolio_history) if self.portfolio_history else [],
             'created_at': self.created_at.isoformat(),
-            'completed_at': self.completed_at.isoformat() if self.completed_at else None
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'ai_analysis_report': self.ai_analysis_report
         }
         if include_trades:
             data['trades'] = [trade.to_dict() for trade in self.trades]
