@@ -8,12 +8,14 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 import redis
+from app.services.deepseek_service import DeepSeekService
 
 # 初始化扩展
 db = SQLAlchemy()
 socketio = SocketIO()
 migrate = Migrate()
 redis_client = None
+deepseek_service = None
 
 # 全局应用实例，供调度任务使用
 _current_app_instance = None
@@ -64,13 +66,18 @@ def create_app(config_name=None):
                      engineio_logger=True)
     
     # 初始化Redis
-    global redis_client
+    global redis_client, deepseek_service
     redis_client = redis.Redis(
         host=app.config['REDIS_HOST'],
         port=app.config['REDIS_PORT'],
         db=app.config['REDIS_DB'],
         decode_responses=True
     )
+
+    # 初始化DeepSeekService
+    deepseek_api_key = app.config.get('DEEPSEEK_API_KEY')
+    deepseek_service = DeepSeekService(api_key=deepseek_api_key)
+    app.deepseek_service = deepseek_service
     
     # 初始化调度器
     from app.scheduler import TaskScheduler

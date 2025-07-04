@@ -24,6 +24,7 @@ from .system_stats import ns as system_stats_ns
 from .jobs import ns as jobs_ns
 from .top_backtest import ns as top_backtest_ns
 from .top_strategy_api import ns as top_strategy_ns
+from .deepseek_api import deepseek_bp # 导入 DeepSeek API 蓝图
 
 # 注册命名空间
 api.add_namespace(data_collection_ns, path='/data-collection')
@@ -44,6 +45,10 @@ def init_api(app):
     # 注册主 API 蓝图
     if 'api' not in app.blueprints:
         app.register_blueprint(api_bp)
+
+    # 注册 DeepSeek API 蓝图
+    if 'deepseek_api' not in app.blueprints:
+        app.register_blueprint(deepseek_bp)
     
     # 初始化调度器API
     scheduler_bp = init_scheduler_api(app, app.scheduler)

@@ -21,6 +21,14 @@ class TopStrategyStock(db.Model):
     expectancy = db.Column(db.Numeric(10, 4), comment='每笔期望收益率')
     profit_factor = db.Column(db.Numeric(10, 4), comment='盈亏比')
     
+    # DeepSeek AI 分析结果字段
+    potential_rating = db.Column(db.String(20), comment='AI潜力评级 (高/中/低)')
+    confidence_score = db.Column(db.Numeric(5, 2), comment='AI置信率 (0-100)')
+    recommendation_reason = db.Column(db.Text, comment='AI推荐理由')
+    buy_point = db.Column(db.String(100), comment='AI建议买入点位')
+    sell_point = db.Column(db.String(100), comment='AI建议卖出点位')
+    risks = db.Column(db.Text, comment='AI风险提示')
+
     # 关联的BacktestResult ID
     backtest_result_id = db.Column(db.Integer, db.ForeignKey('backtest_results.id'), nullable=False)
     
@@ -70,4 +78,10 @@ class TopStrategyStock(db.Model):
             'initial_capital': float(self.initial_capital) if self.initial_capital else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'potential_rating': self.potential_rating,
+            'confidence_score': float(self.confidence_score) if self.confidence_score else None,
+            'recommendation_reason': self.recommendation_reason,
+            'buy_point': self.buy_point,
+            'sell_point': self.sell_point,
+            'risks': self.risks,
         } 

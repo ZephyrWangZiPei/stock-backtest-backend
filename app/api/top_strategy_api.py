@@ -24,11 +24,18 @@ top_stock_model = ns.model('TopStrategyStock', {
     'trade_count': fields.Integer(description='交易次数'),
     'win_rate_lb': fields.Float(description='胜率置信下界'),
     'expectancy': fields.Float(description='期望收益率'),
+    'profit_factor': fields.Float(description='盈亏比'),
     'rank': fields.Integer(description='排名'),
     'backtest_period_days': fields.Integer(description='回测周期天数'),
     'initial_capital': fields.Float(description='初始资金'),
     'created_at': fields.String(description='创建时间'),
     'updated_at': fields.String(description='更新时间'),
+    'potential_rating': fields.String(description='AI潜力评级 (高/中/低)'),
+    'confidence_score': fields.Float(description='AI置信率 (0-100)'),
+    'recommendation_reason': fields.String(description='AI推荐理由'),
+    'buy_point': fields.String(description='AI建议买入点位'),
+    'sell_point': fields.String(description='AI建议卖出点位'),
+    'risks': fields.String(description='AI风险提示'),
 })
 
 strategy_summary_model = ns.model('StrategyTopStocks', {

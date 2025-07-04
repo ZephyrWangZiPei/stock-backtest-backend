@@ -7,6 +7,7 @@ from app.models import Strategy, BacktestResult, CandidateStock, TopStrategyStoc
 from app.backtester.engine import BacktestEngine
 from app.data_collector import DataCollector
 from app.strategies import STRATEGY_MAP
+from app.api.deepseek_api import _analyze_top_stocks_with_deepseek
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +175,53 @@ def update_top_strategy_stocks(strategies: list[str] = None, top_n: int = 5, per
                     db.session.add(top_stock)
                 
                 db.session.commit()
+
+                # 调用 DeepSeek 进行 AI 分析，并更新 TopStrategyStock 记录
+                if top_list:
+                    try:
+                        # 获取刚刚保存的 TopStrategyStock 对象列表，用于AI分析
+                        # 需要重新查询，因为top_stock对象可能在db.session.add后没有刷新其ID
+                        # 或者直接使用 top_stock 对象的列表，但在 _analyze_top_stocks_with_deepseek 中进行查询
+                        # 为了简化，我们直接传入 top_list 中的 stock_code，然后在 AI 函数内部查询最新的 TopStrategyStock
+                        # 但更好的方式是，将 db.session.add 后的 top_stock 对象存起来，然后批量传入
+                        
+                        # 考虑到TopStrategyStock是刚刚创建并提交的，我们可以直接根据 strategy_id 和 rank 查询回来
+                        # 或者更简单的，我们让 _analyze_top_stocks_with_deepseek 直接使用传入的 candidate_top_stocks
+                        # 但这里是针对单个策略的top_list，所以我们先保存，再对这个top_list进行AI分析
+
+                        # 重新查询这些股票，确保它们是持久化且可追踪的Session对象
+                        # 获取刚刚保存的 TopStrategyStock 记录的 ID 列表
+                        saved_top_stock_codes = [entry['code'] for entry in top_list]
+                        ai_candidate_top_stocks = TopStrategyStock.query.filter(
+                            TopStrategyStock.strategy_id == strat_model.id,
+                            TopStrategyStock.stock_code.in_(saved_top_stock_codes)
+                        ).all()
+
+                        if ai_candidate_top_stocks:
+                            logger.info(f"正在为策略 {strategy_identifier} 的 {len(ai_candidate_top_stocks)} 只Top股票调用DeepSeek AI分析...")
+                            ai_analysis_results = _analyze_top_stocks_with_deepseek(app, ai_candidate_top_stocks)
+                            
+                            # 更新 TopStrategyStock 记录
+                            for ai_result in ai_analysis_results:
+                                stock_code = ai_result.get('stock_code')
+                                # Find the corresponding TopStrategyStock object to update
+                                top_stock_to_update = next((ts for ts in ai_candidate_top_stocks if ts.stock_code == stock_code), None)
+                                if top_stock_to_update:
+                                    top_stock_to_update.potential_rating = ai_result.get('potential_rating')
+                                    top_stock_to_update.confidence_score = ai_result.get('confidence_score')
+                                    top_stock_to_update.recommendation_reason = ai_result.get('recommendation_reason')
+                                    top_stock_to_update.buy_point = ai_result.get('buy_point')
+                                    top_stock_to_update.sell_point = ai_result.get('sell_point')
+                                    top_stock_to_update.risks = ai_result.get('risks')
+                                    db.session.add(top_stock_to_update) # Mark for update
+                            db.session.commit() # Commit the AI analysis updates
+                            logger.info(f"策略 {strategy_identifier} 的Top股票AI分析结果已保存。")
+
+                    except Exception as ai_e:
+                        logger.error(f"DeepSeek AI分析 {strategy_identifier} 的Top股票时出错: {ai_e}", exc_info=True)
+                        db.session.rollback() # Rollback only AI analysis part if it fails
+                        # Continue with the next strategy, don't block the whole job
+                
                 logger.info(f"策略 {strategy_identifier} 胜率 Top {top_n} 已保存: {[(d['code'], round(d['score'],3)) for d in top_list]}")
 
             message = f"Top策略回测任务完成！共处理 {len(strategies)} 种策略，每种策略保存前 {top_n} 只股票。"
