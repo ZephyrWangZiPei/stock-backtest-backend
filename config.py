@@ -43,10 +43,10 @@ class Config:
     MAX_PAGE_SIZE = 100
 
     # Tushare Token
-    TUSHARE_TOKEN = os.getenv('TUSHARE_TOKEN', '74a8de7e4f1ace3183ca6568dbc99a4e9112a7c89eca1eec58ec3e2d')
+    TUSHARE_TOKEN = os.getenv('TUSHARE_TOKEN')
 
-    # DeepSeek Token
-    DEEPSEEK_API_KEY = 'sk-e2c1256054a2483ab73608cc149750ca'
+    # DeepSeek API Key
+    DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
 
 class DevelopmentConfig(Config):
     DEBUG = True
