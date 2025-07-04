@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timedelta
 import math
+import threading
 
 from app import db, _current_app_instance, socketio
 from app.models import Strategy, BacktestResult, CandidateStock, TopStrategyStock, Stock
@@ -11,10 +12,45 @@ from app.api.deepseek_api import _analyze_top_stocks_with_deepseek
 
 logger = logging.getLogger(__name__)
 
+# 全局锁，防止重复执行Top策略回测任务
+_top_strategy_backtest_lock = threading.Lock()
+_top_strategy_backtest_running = False
+
 def update_top_strategy_stocks(strategies: list[str] = None, top_n: int = 5, period_days: int = 1095, initial_capital: float = 100000, min_trade_count: int = 3):
     """
     执行多策略回测任务，计算各策略胜率最高的前N只股票并保存到数据库。
     此函数会自动创建并运行在它自己的Flask应用上下文中。
+    
+    注意：此函数包含防重复执行机制，如果已有任务在运行，新的调用将被拒绝。
+    """
+    global _top_strategy_backtest_running
+    
+    # 检查是否已有任务在运行
+    with _top_strategy_backtest_lock:
+        if _top_strategy_backtest_running:
+            logger.warning("⚠️ Top策略回测任务已在运行中，拒绝重复执行")
+            if _current_app_instance:
+                app = _current_app_instance
+                with app.app_context():
+                    socketio.emit('job_status', {
+                        'job_name': 'top_strategy_backtest',
+                        'status': 'rejected',
+                        'message': '任务已在运行中，请稍后再试'
+                    }, namespace='/scheduler')
+            return
+        
+        _top_strategy_backtest_running = True
+    
+    try:
+        _execute_top_strategy_backtest(strategies, top_n, period_days, initial_capital, min_trade_count)
+    finally:
+        # 确保无论成功还是失败都释放锁
+        with _top_strategy_backtest_lock:
+            _top_strategy_backtest_running = False
+
+def _execute_top_strategy_backtest(strategies: list[str] = None, top_n: int = 5, period_days: int = 1095, initial_capital: float = 100000, min_trade_count: int = 3):
+    """
+    实际执行Top策略回测的内部函数
     """
     if not _current_app_instance:
         logger.error("无法获取Flask应用实例，Top策略回测任务无法执行。")
@@ -241,8 +277,20 @@ def update_top_strategy_stocks(strategies: list[str] = None, top_n: int = 5, per
 def backtest_potential_stocks(strategies: list[str] = None, top_n: int = 5, period_days: int = 1095, initial_capital: float = 100000):
     """
     按给定策略对潜力股做回测，返回各策略胜率最高的前 N 只股票。
-    此函数保留用于API直接调用，但建议使用定时任务 update_top_strategy_stocks。
+    
+    ⚠️ 注意：此函数已废弃，不推荐使用！
+    
+    原因：
+    1. 不包含DeepSeek AI分析功能
+    2. 不保存结果到数据库
+    3. 可能与异步任务产生冲突
+    4. 缺少进度提示和错误处理
+    
+    推荐使用：update_top_strategy_stocks() 函数
+    该函数提供完整的异步执行、AI分析和数据库保存功能。
     """
+    logger.warning("⚠️ 使用了已废弃的backtest_potential_stocks函数，建议使用update_top_strategy_stocks")
+    
     if strategies is None:
         strategies = list(STRATEGY_MAP.keys())
 
